@@ -1596,7 +1596,7 @@ end)
 -- ============================================================
 
 -- Flight movement
-RunService.Heartbeat:Connect(function()
+RunService.Stepped:Connect(function()
 	if FlightEnabled then
 		local char = LocalPlayer.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1609,7 +1609,8 @@ RunService.Heartbeat:Connect(function()
 			if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
 			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
 			if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
-			FlightBodyVelocity.Velocity = if dir.Magnitude > 0 then dir.Unit * FlightSpeed else Vector3.zero
+			if dir.Magnitude > 0 then dir = dir.Unit end
+			FlightBodyVelocity.Velocity = dir * FlightSpeed
 			FlightBodyGyro.CFrame = cam.CFrame
 		end
 	end
