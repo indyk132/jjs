@@ -1267,8 +1267,8 @@ end)
 -- Callback forwarding table
 local GameCallbacks = {}
 
--- Combat category
-local Combat = Library:AddCategory("Combat", "crosshair")
+-- BlackFlash category
+local Combat = Library:AddCategory("BlackFlash", "zap")
 Combat:AddToggle("Auto Black Flash", false, function(v)
 	if GameCallbacks.autoBlackFlash then GameCallbacks.autoBlackFlash(v) end
 end)
@@ -1284,6 +1284,20 @@ Combat:AddSlider("Cast Delay 1", 32, 10, 100, function(v)
 end)
 Combat:AddSlider("Cast Delay 2", 35, 10, 100, function(v)
 	if GameCallbacks.setDelay2 then GameCallbacks.setDelay2(v) end
+end)
+Combat:AddSeparator()
+Combat:AddToggle("Auto Parry", false, function(v)
+	if GameCallbacks.autoParry then GameCallbacks.autoParry(v) end
+end)
+Combat:AddSlider("Parry Timing (ms)", 50, 10, 200, function(v)
+	if GameCallbacks.setParryTiming then GameCallbacks.setParryTiming(v) end
+end)
+Combat:AddSeparator()
+Combat:AddToggle("Auto Dodge", false, function(v)
+	if GameCallbacks.autoDodge then GameCallbacks.autoDodge(v) end
+end)
+Combat:AddToggle("M1 Auto Combo", false, function(v)
+	if GameCallbacks.autoCombo then GameCallbacks.autoCombo(v) end
 end)
 
 -- Misc category

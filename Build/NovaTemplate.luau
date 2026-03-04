@@ -1333,8 +1333,8 @@ end)
 -- Callback forwarding table
 local GameCallbacks = {}
 
--- Combat category
-local Combat = Library:AddCategory("Combat", "crosshair")
+-- BlackFlash category
+local Combat = Library:AddCategory("BlackFlash", "zap")
 Combat:AddToggle("Auto Black Flash", false, function(v)
 	if GameCallbacks.autoBlackFlash then GameCallbacks.autoBlackFlash(v) end
 end)
@@ -1350,6 +1350,20 @@ Combat:AddSlider("Cast Delay 1", 32, 10, 100, function(v)
 end)
 Combat:AddSlider("Cast Delay 2", 35, 10, 100, function(v)
 	if GameCallbacks.setDelay2 then GameCallbacks.setDelay2(v) end
+end)
+Combat:AddSeparator()
+Combat:AddToggle("Auto Parry", false, function(v)
+	if GameCallbacks.autoParry then GameCallbacks.autoParry(v) end
+end)
+Combat:AddSlider("Parry Timing (ms)", 50, 10, 200, function(v)
+	if GameCallbacks.setParryTiming then GameCallbacks.setParryTiming(v) end
+end)
+Combat:AddSeparator()
+Combat:AddToggle("Auto Dodge", false, function(v)
+	if GameCallbacks.autoDodge then GameCallbacks.autoDodge(v) end
+end)
+Combat:AddToggle("M1 Auto Combo", false, function(v)
+	if GameCallbacks.autoCombo then GameCallbacks.autoCombo(v) end
 end)
 
 -- Misc category
@@ -1471,208 +1485,109 @@ Library:Notify("Nova JJS loaded!", "success")
 return Library
 
 end)() end,
-    [7] = function()local wax,script,require=ImportGlobals(7)local ImportGlobals return (function(...)--[[
-	Interface Module - Template
-	Utility for creating UI elements with properties applied automatically.
+    [6] = function()local wax,script,require=ImportGlobals(6)local ImportGlobals return (function(...)--[[
+	Icons Module - Template
+	Fetches and manages Lucide icons for the UI.
+	Uses deividcomsono's lucide-roblox-direct for icon spritesheet.
 	
 	Usage:
-		local Interface = require(path.to.Interface)
+		local Icons = require(path.to.Icons)
 		
-		local frame = Interface.New("Frame", {
-			Size = UDim2.fromOffset(200, 100),
-			BackgroundColor3 = Color3.fromRGB(30, 30, 30),
-			Parent = screenGui,
-			
-			["UICorner"] = { CornerRadius = UDim.new(0, 8) },
-			["UIStroke"] = { Color = Color3.fromRGB(50, 50, 50), Thickness = 1 },
-		})
+		-- Apply icon to ImageLabel
+		Icons.ApplyIcon(imageLabel, "settings")
+		Icons.ApplyIcon(imageLabel, "home")
+		
+		-- Get icon data
+		local iconData = Icons.GetIcon("user")
+		if iconData then
+			print(iconData.Url, iconData.ImageRectOffset, iconData.ImageRectSize)
+		end
 ]]
 
-local Interface = {}
+local Icons = {}
 
--- Special UI components that can be created inline
-local SpecialProperties = {
-	["UICorner"] = true,
-	["UIStroke"] = true,
-	["UIPadding"] = true,
-	["UIListLayout"] = true,
-	["UIGridLayout"] = true,
-	["UITableLayout"] = true,
-	["UIPageLayout"] = true,
-	["UIFlexItem"] = true,
-	["UISizeConstraint"] = true,
-	["UITextSizeConstraint"] = true,
-	["UIAspectRatioConstraint"] = true,
-	["UIGradient"] = true,
-	["UIScale"] = true,
+export type IconData = {
+	Url: string,
+	Id: number,
+	IconName: string,
+	ImageRectOffset: Vector2,
+	ImageRectSize: Vector2,
 }
 
---[[
-	Create a new instance with properties
-	@param className The class name of the instance to create
-	@param properties Table of properties to apply (supports nested UI components)
-	@return The created instance
-]]
-function Interface.New(className: string, properties: { [string]: any }?): Instance
-	local instance = Instance.new(className)
+-- Try to load the icons module
+local Success, IconsModule = pcall(function()
+	local IconFetchSuccess, IconModuleSource = pcall(request, {
+		Url = "https://raw.githubusercontent.com/deividcomsono/lucide-roblox-direct/refs/heads/main/source.lua",
+		Method = "GET",
+	})
 
-	if properties then
-		for key, value in pairs(properties) do
-			if SpecialProperties[key] then
-				-- Create UI component as child
-				local uiComponent = Instance.new(key)
-				if type(value) == "table" then
-					for prop, val in pairs(value) do
-						uiComponent[prop] = val
-					end
-				end
-				uiComponent.Parent = instance
-			else
-				instance[key] = value
-			end
-		end
-	end
+	assert(
+		IconFetchSuccess and IconModuleSource.Success or IconModuleSource.StatusCode >= 200 and IconModuleSource.StatusCode < 300,
+		"Failed to fetch lucide icons direct module source"
+	)
+	return (loadstring(IconModuleSource.Body) :: () -> { Icons: { string }, GetAsset: (Name: string) -> IconData? })()
+end)
 
-	return instance
+if not Success then
+	warn("[Icons] Failed to load Lucide icons module. Icons will not be available.")
 end
 
 --[[
-	Create a ScreenGui with common settings
-	@param name The name of the ScreenGui
-	@param parent Optional parent (defaults to CoreGui/PlayerGui)
-	@return The created ScreenGui
+	Get icon data by name
+	@param iconName The name of the Lucide icon
+	@return IconData or nil if not found
 ]]
-function Interface.CreateScreenGui(name: string, parent: Instance?): ScreenGui
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = name
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	screenGui.ResetOnSpawn = false
-	screenGui.DisplayOrder = 999999
-
-	if parent then
-		screenGui.Parent = parent
-	else
-		-- Try gethui first, then CoreGui
-		local success, _ = pcall(function()
-			if gethui then
-				screenGui.Parent = gethui()
-			else
-				screenGui.Parent = wax.shared.CoreGui
-			end
-		end)
-
-		if not success then
-			pcall(function()
-				screenGui.Parent = wax.shared.Players.LocalPlayer:WaitForChild("PlayerGui")
-			end)
-		end
+function Icons.GetIcon(iconName: string): IconData?
+	if not Success or not IconsModule then
+		return nil
 	end
 
-	return screenGui
+	local success, icon = pcall(IconsModule.GetAsset, iconName)
+	if not success then
+		return nil
+	end
+
+	return icon
 end
 
 --[[
-	Create a TextLabel with sensible defaults
+	Apply icon to an ImageLabel
+	@param imageLabel The ImageLabel to apply the icon to
+	@param iconName The name of the Lucide icon
+	@return boolean indicating success
 ]]
-function Interface.CreateTextLabel(properties: { [string]: any }): TextLabel
-	local defaults = {
-		BackgroundTransparency = 1,
-		TextColor3 = Color3.fromRGB(220, 220, 220),
-		TextSize = 14,
-		Font = Enum.Font.GothamMedium,
-		TextXAlignment = Enum.TextXAlignment.Left,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
+function Icons.ApplyIcon(imageLabel: ImageLabel, iconName: string): boolean
+	local icon = Icons.GetIcon(iconName)
+	if not icon then
+		return false
 	end
 
-	return Interface.New("TextLabel", properties) :: TextLabel
+	imageLabel.Image = icon.Url
+	imageLabel.ImageRectOffset = icon.ImageRectOffset
+	imageLabel.ImageRectSize = icon.ImageRectSize
+	return true
 end
 
 --[[
-	Create a TextButton with sensible defaults
+	Check if icons are available
+	@return boolean
 ]]
-function Interface.CreateTextButton(properties: { [string]: any }): TextButton
-	local defaults = {
-		BackgroundTransparency = 1,
-		TextColor3 = Color3.fromRGB(220, 220, 220),
-		TextSize = 14,
-		Font = Enum.Font.GothamMedium,
-		AutoButtonColor = false,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("TextButton", properties) :: TextButton
+function Icons.IsAvailable(): boolean
+	return Success and IconsModule ~= nil
 end
 
 --[[
-	Create an ImageLabel with sensible defaults
+	Get list of all available icon names
+	@return Array of icon names or empty array if not loaded
 ]]
-function Interface.CreateImageLabel(properties: { [string]: any }): ImageLabel
-	local defaults = {
-		BackgroundTransparency = 1,
-		ScaleType = Enum.ScaleType.Fit,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
+function Icons.GetAllIconNames(): { string }
+	if not Success or not IconsModule or not IconsModule.Icons then
+		return {}
 	end
-
-	return Interface.New("ImageLabel", properties) :: ImageLabel
+	return IconsModule.Icons
 end
 
---[[
-	Create an ImageButton with sensible defaults
-]]
-function Interface.CreateImageButton(properties: { [string]: any }): ImageButton
-	local defaults = {
-		BackgroundTransparency = 1,
-		ScaleType = Enum.ScaleType.Fit,
-		AutoButtonColor = false,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("ImageButton", properties) :: ImageButton
-end
-
---[[
-	Create a ScrollingFrame with sensible defaults
-]]
-function Interface.CreateScrollingFrame(properties: { [string]: any }): ScrollingFrame
-	local defaults = {
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ScrollBarThickness = 4,
-		ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80),
-		CanvasSize = UDim2.new(0, 0, 0, 0),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("ScrollingFrame", properties) :: ScrollingFrame
-end
-
-return Interface
+return Icons
 
 end)() end,
     [9] = function()local wax,script,require=ImportGlobals(9)local ImportGlobals return (function(...)--[[
@@ -2042,109 +1957,208 @@ end
 return Resize
 
 end)() end,
-    [6] = function()local wax,script,require=ImportGlobals(6)local ImportGlobals return (function(...)--[[
-	Icons Module - Template
-	Fetches and manages Lucide icons for the UI.
-	Uses deividcomsono's lucide-roblox-direct for icon spritesheet.
+    [7] = function()local wax,script,require=ImportGlobals(7)local ImportGlobals return (function(...)--[[
+	Interface Module - Template
+	Utility for creating UI elements with properties applied automatically.
 	
 	Usage:
-		local Icons = require(path.to.Icons)
+		local Interface = require(path.to.Interface)
 		
-		-- Apply icon to ImageLabel
-		Icons.ApplyIcon(imageLabel, "settings")
-		Icons.ApplyIcon(imageLabel, "home")
-		
-		-- Get icon data
-		local iconData = Icons.GetIcon("user")
-		if iconData then
-			print(iconData.Url, iconData.ImageRectOffset, iconData.ImageRectSize)
-		end
+		local frame = Interface.New("Frame", {
+			Size = UDim2.fromOffset(200, 100),
+			BackgroundColor3 = Color3.fromRGB(30, 30, 30),
+			Parent = screenGui,
+			
+			["UICorner"] = { CornerRadius = UDim.new(0, 8) },
+			["UIStroke"] = { Color = Color3.fromRGB(50, 50, 50), Thickness = 1 },
+		})
 ]]
 
-local Icons = {}
+local Interface = {}
 
-export type IconData = {
-	Url: string,
-	Id: number,
-	IconName: string,
-	ImageRectOffset: Vector2,
-	ImageRectSize: Vector2,
+-- Special UI components that can be created inline
+local SpecialProperties = {
+	["UICorner"] = true,
+	["UIStroke"] = true,
+	["UIPadding"] = true,
+	["UIListLayout"] = true,
+	["UIGridLayout"] = true,
+	["UITableLayout"] = true,
+	["UIPageLayout"] = true,
+	["UIFlexItem"] = true,
+	["UISizeConstraint"] = true,
+	["UITextSizeConstraint"] = true,
+	["UIAspectRatioConstraint"] = true,
+	["UIGradient"] = true,
+	["UIScale"] = true,
 }
 
--- Try to load the icons module
-local Success, IconsModule = pcall(function()
-	local IconFetchSuccess, IconModuleSource = pcall(request, {
-		Url = "https://raw.githubusercontent.com/deividcomsono/lucide-roblox-direct/refs/heads/main/source.lua",
-		Method = "GET",
-	})
+--[[
+	Create a new instance with properties
+	@param className The class name of the instance to create
+	@param properties Table of properties to apply (supports nested UI components)
+	@return The created instance
+]]
+function Interface.New(className: string, properties: { [string]: any }?): Instance
+	local instance = Instance.new(className)
 
-	assert(
-		IconFetchSuccess and IconModuleSource.Success or IconModuleSource.StatusCode >= 200 and IconModuleSource.StatusCode < 300,
-		"Failed to fetch lucide icons direct module source"
-	)
-	return (loadstring(IconModuleSource.Body) :: () -> { Icons: { string }, GetAsset: (Name: string) -> IconData? })()
-end)
+	if properties then
+		for key, value in pairs(properties) do
+			if SpecialProperties[key] then
+				-- Create UI component as child
+				local uiComponent = Instance.new(key)
+				if type(value) == "table" then
+					for prop, val in pairs(value) do
+						uiComponent[prop] = val
+					end
+				end
+				uiComponent.Parent = instance
+			else
+				instance[key] = value
+			end
+		end
+	end
 
-if not Success then
-	warn("[Icons] Failed to load Lucide icons module. Icons will not be available.")
+	return instance
 end
 
 --[[
-	Get icon data by name
-	@param iconName The name of the Lucide icon
-	@return IconData or nil if not found
+	Create a ScreenGui with common settings
+	@param name The name of the ScreenGui
+	@param parent Optional parent (defaults to CoreGui/PlayerGui)
+	@return The created ScreenGui
 ]]
-function Icons.GetIcon(iconName: string): IconData?
-	if not Success or not IconsModule then
-		return nil
+function Interface.CreateScreenGui(name: string, parent: Instance?): ScreenGui
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = name
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.ResetOnSpawn = false
+	screenGui.DisplayOrder = 999999
+
+	if parent then
+		screenGui.Parent = parent
+	else
+		-- Try gethui first, then CoreGui
+		local success, _ = pcall(function()
+			if gethui then
+				screenGui.Parent = gethui()
+			else
+				screenGui.Parent = wax.shared.CoreGui
+			end
+		end)
+
+		if not success then
+			pcall(function()
+				screenGui.Parent = wax.shared.Players.LocalPlayer:WaitForChild("PlayerGui")
+			end)
+		end
 	end
 
-	local success, icon = pcall(IconsModule.GetAsset, iconName)
-	if not success then
-		return nil
-	end
-
-	return icon
+	return screenGui
 end
 
 --[[
-	Apply icon to an ImageLabel
-	@param imageLabel The ImageLabel to apply the icon to
-	@param iconName The name of the Lucide icon
-	@return boolean indicating success
+	Create a TextLabel with sensible defaults
 ]]
-function Icons.ApplyIcon(imageLabel: ImageLabel, iconName: string): boolean
-	local icon = Icons.GetIcon(iconName)
-	if not icon then
-		return false
+function Interface.CreateTextLabel(properties: { [string]: any }): TextLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		TextColor3 = Color3.fromRGB(220, 220, 220),
+		TextSize = 14,
+		Font = Enum.Font.GothamMedium,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
 	end
 
-	imageLabel.Image = icon.Url
-	imageLabel.ImageRectOffset = icon.ImageRectOffset
-	imageLabel.ImageRectSize = icon.ImageRectSize
-	return true
+	return Interface.New("TextLabel", properties) :: TextLabel
 end
 
 --[[
-	Check if icons are available
-	@return boolean
+	Create a TextButton with sensible defaults
 ]]
-function Icons.IsAvailable(): boolean
-	return Success and IconsModule ~= nil
+function Interface.CreateTextButton(properties: { [string]: any }): TextButton
+	local defaults = {
+		BackgroundTransparency = 1,
+		TextColor3 = Color3.fromRGB(220, 220, 220),
+		TextSize = 14,
+		Font = Enum.Font.GothamMedium,
+		AutoButtonColor = false,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
+	end
+
+	return Interface.New("TextButton", properties) :: TextButton
 end
 
 --[[
-	Get list of all available icon names
-	@return Array of icon names or empty array if not loaded
+	Create an ImageLabel with sensible defaults
 ]]
-function Icons.GetAllIconNames(): { string }
-	if not Success or not IconsModule or not IconsModule.Icons then
-		return {}
+function Interface.CreateImageLabel(properties: { [string]: any }): ImageLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		ScaleType = Enum.ScaleType.Fit,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
 	end
-	return IconsModule.Icons
+
+	return Interface.New("ImageLabel", properties) :: ImageLabel
 end
 
-return Icons
+--[[
+	Create an ImageButton with sensible defaults
+]]
+function Interface.CreateImageButton(properties: { [string]: any }): ImageButton
+	local defaults = {
+		BackgroundTransparency = 1,
+		ScaleType = Enum.ScaleType.Fit,
+		AutoButtonColor = false,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
+	end
+
+	return Interface.New("ImageButton", properties) :: ImageButton
+end
+
+--[[
+	Create a ScrollingFrame with sensible defaults
+]]
+function Interface.CreateScrollingFrame(properties: { [string]: any }): ScrollingFrame
+	local defaults = {
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 4,
+		ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
+	end
+
+	return Interface.New("ScrollingFrame", properties) :: ScrollingFrame
+end
+
+return Interface
 
 end)() end,
     [5] = function()local wax,script,require=ImportGlobals(5)local ImportGlobals return (function(...)--[[
@@ -2458,20 +2472,6 @@ local ObjectTree = {
                         },
                         {
                             {
-                                4,
-                                2,
-                                {
-                                    "Drag"
-                                }
-                            },
-                            {
-                                7,
-                                2,
-                                {
-                                    "Interface"
-                                }
-                            },
-                            {
                                 10,
                                 2,
                                 {
@@ -2486,10 +2486,24 @@ local ObjectTree = {
                                 }
                             },
                             {
-                                6,
+                                4,
                                 2,
                                 {
-                                    "Icons"
+                                    "Drag"
+                                }
+                            },
+                            {
+                                5,
+                                2,
+                                {
+                                    "Helper"
+                                }
+                            },
+                            {
+                                7,
+                                2,
+                                {
+                                    "Interface"
                                 }
                             },
                             {
@@ -2500,10 +2514,10 @@ local ObjectTree = {
                                 }
                             },
                             {
-                                5,
+                                6,
                                 2,
                                 {
-                                    "Helper"
+                                    "Icons"
                                 }
                             }
                         }
@@ -2516,14 +2530,14 @@ local ObjectTree = {
 
 -- Line offsets for debugging (only included when minifyTables is false)
 local LineOffsets = {
-    [7] = 1474,
-    [9] = 1678,
+    [6] = 1488,
+    [9] = 1593,
     [2] = 67,
     [10] = 8,
-    [8] = 1906,
-    [6] = 2045,
-    [5] = 2150,
-    [4] = 2332
+    [8] = 1821,
+    [7] = 1960,
+    [5] = 2164,
+    [4] = 2346
 }
 
 -- Misc AOT variable imports
