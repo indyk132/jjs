@@ -5,63 +5,109 @@ local ImportGlobals
 
 -- Holds direct closure data (defining this before the DOM tree for line debugging etc)
 local ClosureBindings = {
-    [10] = function()local wax,script,require=ImportGlobals(10)local ImportGlobals return (function(...)--[[
-	Theme Module - Template (Based on Nova)
-	Centralized color definitions for consistent UI theming.
+    [6] = function()local wax,script,require=ImportGlobals(6)local ImportGlobals return (function(...)--[[
+	Icons Module - Template
+	Fetches and manages Lucide icons for the UI.
+	Uses deividcomsono's lucide-roblox-direct for icon spritesheet.
 	
 	Usage:
-		local Theme = require(path.to.Theme)
-		frame.BackgroundColor3 = Theme.Background
+		local Icons = require(path.to.Icons)
+		
+		-- Apply icon to ImageLabel
+		Icons.ApplyIcon(imageLabel, "settings")
+		Icons.ApplyIcon(imageLabel, "home")
+		
+		-- Get icon data
+		local iconData = Icons.GetIcon("user")
+		if iconData then
+			print(iconData.Url, iconData.ImageRectOffset, iconData.ImageRectSize)
+		end
 ]]
 
-local Theme = {
-	-- Base colors
-	Background = Color3.fromRGB(15, 15, 15),
-	Surface = Color3.fromRGB(20, 20, 20),
-	SurfaceHover = Color3.fromRGB(28, 28, 28),
-	
-	-- Border colors
-	Border = Color3.fromRGB(40, 40, 40),
-	BorderLight = Color3.fromRGB(55, 55, 55),
-	
-	-- Text colors
-	Text = Color3.fromRGB(220, 220, 220),
-	TextMuted = Color3.fromRGB(140, 140, 140),
-	
-	-- Accent colors
-	Accent = Color3.fromRGB(88, 101, 242),
-	AccentHover = Color3.fromRGB(98, 111, 252),
-	
-	-- Status colors
-	Success = Color3.fromRGB(63, 185, 80),
-	Warning = Color3.fromRGB(210, 153, 34),
-	Error = Color3.fromRGB(248, 81, 73),
-	Info = Color3.fromRGB(88, 166, 255),
-	
-	-- Direction colors (from Nova's Incoming/Outgoing)
-	Primary = Color3.fromRGB(63, 185, 80),
-	Secondary = Color3.fromRGB(247, 129, 102),
+local Icons = {}
+
+export type IconData = {
+	Url: string,
+	Id: number,
+	IconName: string,
+	ImageRectOffset: Vector2,
+	ImageRectSize: Vector2,
 }
 
--- Utility function to lighten a color
-function Theme.Lighten(color: Color3, amount: number): Color3
-	return Color3.new(
-		math.min(color.R + amount, 1),
-		math.min(color.G + amount, 1),
-		math.min(color.B + amount, 1)
+-- Try to load the icons module
+local Success, IconsModule = pcall(function()
+	local IconFetchSuccess, IconModuleSource = pcall(request, {
+		Url = "https://raw.githubusercontent.com/deividcomsono/lucide-roblox-direct/refs/heads/main/source.lua",
+		Method = "GET",
+	})
+
+	assert(
+		IconFetchSuccess and IconModuleSource.Success or IconModuleSource.StatusCode >= 200 and IconModuleSource.StatusCode < 300,
+		"Failed to fetch lucide icons direct module source"
 	)
+	return (loadstring(IconModuleSource.Body) :: () -> { Icons: { string }, GetAsset: (Name: string) -> IconData? })()
+end)
+
+if not Success then
+	warn("[Icons] Failed to load Lucide icons module. Icons will not be available.")
 end
 
--- Utility function to darken a color
-function Theme.Darken(color: Color3, amount: number): Color3
-	return Color3.new(
-		math.max(color.R - amount, 0),
-		math.max(color.G - amount, 0),
-		math.max(color.B - amount, 0)
-	)
+--[[
+	Get icon data by name
+	@param iconName The name of the Lucide icon
+	@return IconData or nil if not found
+]]
+function Icons.GetIcon(iconName: string): IconData?
+	if not Success or not IconsModule then
+		return nil
+	end
+
+	local success, icon = pcall(IconsModule.GetAsset, iconName)
+	if not success then
+		return nil
+	end
+
+	return icon
 end
 
-return Theme
+--[[
+	Apply icon to an ImageLabel
+	@param imageLabel The ImageLabel to apply the icon to
+	@param iconName The name of the Lucide icon
+	@return boolean indicating success
+]]
+function Icons.ApplyIcon(imageLabel: ImageLabel, iconName: string): boolean
+	local icon = Icons.GetIcon(iconName)
+	if not icon then
+		return false
+	end
+
+	imageLabel.Image = icon.Url
+	imageLabel.ImageRectOffset = icon.ImageRectOffset
+	imageLabel.ImageRectSize = icon.ImageRectSize
+	return true
+end
+
+--[[
+	Check if icons are available
+	@return boolean
+]]
+function Icons.IsAvailable(): boolean
+	return Success and IconsModule ~= nil
+end
+
+--[[
+	Get list of all available icon names
+	@return Array of icon names or empty array if not loaded
+]]
+function Icons.GetAllIconNames(): { string }
+	if not Success or not IconsModule or not IconsModule.Icons then
+		return {}
+	end
+	return IconsModule.Icons
+end
+
+return Icons
 
 end)() end,
     [2] = function()local wax,script,require=ImportGlobals(2)local ImportGlobals return (function(...)--[[
@@ -1330,11 +1376,224 @@ end)
 -- GUI CATEGORIES + JJS INTEGRATION
 -- ============================================================
 
+-- Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
 -- Callback forwarding table
 local GameCallbacks = {}
 
+-- ============================================================
+-- ORCA FEATURES — Character / Players / Misc
+-- ============================================================
+
+-- --- state ---
+local FlightEnabled = false
+local FlightSpeed = 60
+local WalkSpeedEnabled = false
+local WalkSpeedValue = 16
+local OriginalWalkSpeed = 16
+local JumpHeightEnabled = false
+local JumpHeightValue = 50
+local OriginalJumpPower = 50
+local NoclipEnabled = false
+local GodModeEnabled = false
+local FreecamEnabled = false
+local FreecamSpeed = 1
+local FreecamCFrame: CFrame? = nil
+local FreecamAngles = {x = 0, y = 0}
+local OriginalCameraSubject = nil
+local SpectateEnabled = false
+local SpectateTarget: string? = nil
+
+-- flight objects
+local FlightBodyVelocity: BodyVelocity? = nil
+local FlightBodyGyro: BodyGyro? = nil
+
+-- --- Character category ---
+local CharCat = Library:AddCategory("Character", "user")
+CharCat:AddToggle("Flight", false, function(v)
+	FlightEnabled = v
+	local char = LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if v and hrp then
+		if FlightBodyVelocity then FlightBodyVelocity:Destroy() end
+		if FlightBodyGyro then FlightBodyGyro:Destroy() end
+		FlightBodyVelocity = Instance.new("BodyVelocity")
+		FlightBodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+		FlightBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+		FlightBodyVelocity.Parent = hrp
+		FlightBodyGyro = Instance.new("BodyGyro")
+		FlightBodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+		FlightBodyGyro.P = 9000
+		FlightBodyGyro.Parent = hrp
+		if hum then hum.PlatformStand = true end
+	else
+		if FlightBodyVelocity then FlightBodyVelocity:Destroy(); FlightBodyVelocity = nil end
+		if FlightBodyGyro then FlightBodyGyro:Destroy(); FlightBodyGyro = nil end
+		if hum then hum.PlatformStand = false end
+	end
+	Library:Notify(`Flight: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Flight Speed", 60, 10, 200, function(v)
+	FlightSpeed = v
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Walk Speed", false, function(v)
+	WalkSpeedEnabled = v
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if v then
+			OriginalWalkSpeed = hum.WalkSpeed
+		else
+			hum.WalkSpeed = OriginalWalkSpeed
+		end
+	end
+	Library:Notify(`Walk Speed: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Speed Value", 16, 1, 500, function(v)
+	WalkSpeedValue = v
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Jump Height", false, function(v)
+	JumpHeightEnabled = v
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if v then
+			OriginalJumpPower = hum.JumpPower
+		else
+			hum.UseJumpPower = true
+			hum.JumpPower = OriginalJumpPower
+		end
+	end
+	Library:Notify(`Jump Height: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Height Value", 50, 1, 500, function(v)
+	JumpHeightValue = v
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Noclip", false, function(v)
+	NoclipEnabled = v
+	Library:Notify(`Noclip: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddToggle("God Mode", false, function(v)
+	GodModeEnabled = v
+	Library:Notify(`God Mode: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Freecam", false, function(v)
+	FreecamEnabled = v
+	local cam = Workspace.CurrentCamera
+	if v then
+		OriginalCameraSubject = cam.CameraSubject
+		FreecamCFrame = cam.CFrame
+		local rx, ry = cam.CFrame:ToEulerAnglesYXZ()
+		FreecamAngles = {x = rx, y = ry}
+		cam.CameraType = Enum.CameraType.Scriptable
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	else
+		cam.CameraType = Enum.CameraType.Custom
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		if OriginalCameraSubject then
+			cam.CameraSubject = OriginalCameraSubject
+		end
+		FreecamCFrame = nil
+	end
+	Library:Notify(`Freecam: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Freecam Speed", 1, 1, 10, function(v)
+	FreecamSpeed = v
+end)
+
+-- --- Players category ---
+local PlayersCat = Library:AddCategory("Players", "users")
+local _playerNames: {string} = {}
+for _, p in Players:GetPlayers() do
+	if p ~= LocalPlayer then table.insert(_playerNames, p.Name) end
+end
+local TargetPlayerDropdown = PlayersCat:AddDropdown("Target Player", _playerNames, _playerNames[1] or "(none)", function(v)
+	SpectateTarget = v
+end)
+Players.PlayerAdded:Connect(function(p)
+	if p ~= LocalPlayer then
+		table.insert(_playerNames, p.Name)
+		if TargetPlayerDropdown.UpdateOptions then TargetPlayerDropdown:UpdateOptions(_playerNames) end
+	end
+end)
+Players.PlayerRemoving:Connect(function(p)
+	local idx = table.find(_playerNames, p.Name)
+	if idx then table.remove(_playerNames, idx) end
+	if TargetPlayerDropdown.UpdateOptions then TargetPlayerDropdown:UpdateOptions(_playerNames) end
+end)
+PlayersCat:AddButton("Teleport to Player", function()
+	if not SpectateTarget then Library:Notify("No player selected!", "error"); return end
+	local target = Players:FindFirstChild(SpectateTarget)
+	if not target or not target.Character then Library:Notify("Player not found!", "error"); return end
+	local hrp = target.Character:FindFirstChild("HumanoidRootPart")
+	local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if hrp and myHrp then
+		myHrp.CFrame = hrp.CFrame * CFrame.new(0, 0, 3)
+		Library:Notify(`Teleported to {SpectateTarget}!`, "success")
+	end
+end)
+PlayersCat:AddToggle("Spectate", false, function(v)
+	SpectateEnabled = v
+	if v and SpectateTarget then
+		local target = Players:FindFirstChild(SpectateTarget)
+		if target and target.Character then
+			Workspace.CurrentCamera.CameraSubject = target.Character:FindFirstChildOfClass("Humanoid") or target.Character
+			Library:Notify(`Spectating {SpectateTarget}`, "success")
+		end
+	else
+		local char = LocalPlayer.Character
+		if char then
+			Workspace.CurrentCamera.CameraSubject = char:FindFirstChildOfClass("Humanoid") or char
+		end
+		if v then Library:Notify("No player selected!", "error") end
+	end
+end)
+
+-- --- Misc category ---
+local Misc = Library:AddCategory("Misc", "wrench")
+Misc:AddButton("Rejoin", function()
+	TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId)
+	Library:Notify("Rejoining...", "warning")
+end)
+Misc:AddButton("Server Hop", function()
+	pcall(function()
+		local url = `https://games.roblox.com/v1/games/{game.GameId}/servers/Public?sortOrder=Asc&limit=100`
+		local data = HttpService:JSONDecode(game:HttpGet(url))
+		if data and data.data then
+			for _, s in data.data do
+				if s.id ~= game.JobId and s.playing < s.maxPlayers then
+					TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id)
+					Library:Notify("Server hopping...", "warning")
+					return
+				end
+			end
+		end
+		Library:Notify("No available servers!", "error")
+	end)
+end)
+Misc:AddButton("Copy Job ID", function()
+	if setclipboard then
+		setclipboard(game.JobId)
+		Library:Notify("Job ID copied!", "success")
+	else
+		Library:Notify("Clipboard not supported!", "error")
+	end
+end)
+
 -- BlackFlash category
-local Combat = Library:AddCategory("BlackFlash", "zap")
+local Combat = Library:AddCategory("Black Flash", "zap")
 Combat:AddToggle("Auto Black Flash", false, function(v)
 	if GameCallbacks.autoBlackFlash then GameCallbacks.autoBlackFlash(v) end
 end)
@@ -1350,29 +1609,6 @@ Combat:AddSlider("Cast Delay 1", 32, 10, 100, function(v)
 end)
 Combat:AddSlider("Cast Delay 2", 35, 10, 100, function(v)
 	if GameCallbacks.setDelay2 then GameCallbacks.setDelay2(v) end
-end)
-Combat:AddSeparator()
-Combat:AddToggle("Auto Parry", false, function(v)
-	if GameCallbacks.autoParry then GameCallbacks.autoParry(v) end
-end)
-Combat:AddSlider("Parry Timing (ms)", 50, 10, 200, function(v)
-	if GameCallbacks.setParryTiming then GameCallbacks.setParryTiming(v) end
-end)
-Combat:AddSeparator()
-Combat:AddToggle("Auto Dodge", false, function(v)
-	if GameCallbacks.autoDodge then GameCallbacks.autoDodge(v) end
-end)
-Combat:AddToggle("M1 Auto Combo", false, function(v)
-	if GameCallbacks.autoCombo then GameCallbacks.autoCombo(v) end
-end)
-
--- Misc category
-local Misc = Library:AddCategory("Misc", "wrench")
-Misc:AddButton("Rejoin", function()
-	if GameCallbacks.rejoin then GameCallbacks.rejoin() end
-end)
-Misc:AddButton("Copy Job ID", function()
-	if GameCallbacks.copyJobId then GameCallbacks.copyJobId() end
 end)
 
 -- ============================================================
@@ -1465,18 +1701,77 @@ pcall(function()
 	GameCallbacks.setDelay2 = function(v)
 		delay2 = v / 100
 	end
+end)
 
-	GameCallbacks.rejoin = function()
-		pcall(function()
-			TeleportService:Teleport(game.PlaceId, LocalPlayer)
-		end)
+-- ============================================================
+-- CHARACTER FEATURE LOOPS
+-- ============================================================
+
+RunService.Stepped:Connect(function()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+
+	-- Noclip
+	if NoclipEnabled then
+		for _, part in char:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+			end
+		end
 	end
 
-	GameCallbacks.copyJobId = function()
-		pcall(function()
-			setclipboard(game.JobId)
-			Library:Notify("Job ID copied!", "success")
-		end)
+	-- God Mode
+	if GodModeEnabled and hum then
+		hum.Health = hum.MaxHealth
+	end
+
+	-- Walk Speed
+	if WalkSpeedEnabled and hum then
+		hum.WalkSpeed = WalkSpeedValue
+	end
+
+	-- Jump Height
+	if JumpHeightEnabled and hum then
+		hum.UseJumpPower = true
+		hum.JumpPower = JumpHeightValue
+	end
+
+	-- Flight
+	if FlightEnabled and hrp and FlightBodyVelocity then
+		local cam = Workspace.CurrentCamera
+		local dir = Vector3.new(0, 0, 0)
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
+		if dir.Magnitude > 0 then dir = dir.Unit end
+		FlightBodyVelocity.Velocity = dir * FlightSpeed
+		if FlightBodyGyro then FlightBodyGyro.CFrame = cam.CFrame end
+	end
+end)
+
+-- Freecam loop
+RunService.RenderStepped:Connect(function(dt)
+	if FreecamEnabled and FreecamCFrame then
+		local cam = Workspace.CurrentCamera
+		local delta = UserInputService:GetMouseDelta()
+		FreecamAngles.y = FreecamAngles.y - delta.X * 0.003
+		FreecamAngles.x = math.clamp(FreecamAngles.x - delta.Y * 0.003, -math.pi/2 + 0.1, math.pi/2 - 0.1)
+		local rot = CFrame.fromEulerAnglesYXZ(FreecamAngles.x, FreecamAngles.y, 0)
+		local move = Vector3.new(0, 0, 0)
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then move = move + Vector3.new(0, -1, 0) end
+		local speed = FreecamSpeed * 60 * dt
+		FreecamCFrame = CFrame.new(FreecamCFrame.Position) * rot * CFrame.new(move * speed)
+		cam.CFrame = FreecamCFrame
 	end
 end)
 
@@ -1485,109 +1780,406 @@ Library:Notify("Nova JJS loaded!", "success")
 return Library
 
 end)() end,
-    [6] = function()local wax,script,require=ImportGlobals(6)local ImportGlobals return (function(...)--[[
-	Icons Module - Template
-	Fetches and manages Lucide icons for the UI.
-	Uses deividcomsono's lucide-roblox-direct for icon spritesheet.
+    [10] = function()local wax,script,require=ImportGlobals(10)local ImportGlobals return (function(...)--[[
+	Theme Module - Template (Based on Nova)
+	Centralized color definitions for consistent UI theming.
 	
 	Usage:
-		local Icons = require(path.to.Icons)
-		
-		-- Apply icon to ImageLabel
-		Icons.ApplyIcon(imageLabel, "settings")
-		Icons.ApplyIcon(imageLabel, "home")
-		
-		-- Get icon data
-		local iconData = Icons.GetIcon("user")
-		if iconData then
-			print(iconData.Url, iconData.ImageRectOffset, iconData.ImageRectSize)
-		end
+		local Theme = require(path.to.Theme)
+		frame.BackgroundColor3 = Theme.Background
 ]]
 
-local Icons = {}
-
-export type IconData = {
-	Url: string,
-	Id: number,
-	IconName: string,
-	ImageRectOffset: Vector2,
-	ImageRectSize: Vector2,
+local Theme = {
+	-- Base colors
+	Background = Color3.fromRGB(15, 15, 15),
+	Surface = Color3.fromRGB(20, 20, 20),
+	SurfaceHover = Color3.fromRGB(28, 28, 28),
+	
+	-- Border colors
+	Border = Color3.fromRGB(40, 40, 40),
+	BorderLight = Color3.fromRGB(55, 55, 55),
+	
+	-- Text colors
+	Text = Color3.fromRGB(220, 220, 220),
+	TextMuted = Color3.fromRGB(140, 140, 140),
+	
+	-- Accent colors
+	Accent = Color3.fromRGB(88, 101, 242),
+	AccentHover = Color3.fromRGB(98, 111, 252),
+	
+	-- Status colors
+	Success = Color3.fromRGB(63, 185, 80),
+	Warning = Color3.fromRGB(210, 153, 34),
+	Error = Color3.fromRGB(248, 81, 73),
+	Info = Color3.fromRGB(88, 166, 255),
+	
+	-- Direction colors (from Nova's Incoming/Outgoing)
+	Primary = Color3.fromRGB(63, 185, 80),
+	Secondary = Color3.fromRGB(247, 129, 102),
 }
 
--- Try to load the icons module
-local Success, IconsModule = pcall(function()
-	local IconFetchSuccess, IconModuleSource = pcall(request, {
-		Url = "https://raw.githubusercontent.com/deividcomsono/lucide-roblox-direct/refs/heads/main/source.lua",
-		Method = "GET",
-	})
-
-	assert(
-		IconFetchSuccess and IconModuleSource.Success or IconModuleSource.StatusCode >= 200 and IconModuleSource.StatusCode < 300,
-		"Failed to fetch lucide icons direct module source"
+-- Utility function to lighten a color
+function Theme.Lighten(color: Color3, amount: number): Color3
+	return Color3.new(
+		math.min(color.R + amount, 1),
+		math.min(color.G + amount, 1),
+		math.min(color.B + amount, 1)
 	)
-	return (loadstring(IconModuleSource.Body) :: () -> { Icons: { string }, GetAsset: (Name: string) -> IconData? })()
-end)
+end
 
-if not Success then
-	warn("[Icons] Failed to load Lucide icons module. Icons will not be available.")
+-- Utility function to darken a color
+function Theme.Darken(color: Color3, amount: number): Color3
+	return Color3.new(
+		math.max(color.R - amount, 0),
+		math.max(color.G - amount, 0),
+		math.max(color.B - amount, 0)
+	)
+end
+
+return Theme
+
+end)() end,
+    [7] = function()local wax,script,require=ImportGlobals(7)local ImportGlobals return (function(...)--[[
+	Interface Module - Template
+	Utility for creating UI elements with properties applied automatically.
+	
+	Usage:
+		local Interface = require(path.to.Interface)
+		
+		local frame = Interface.New("Frame", {
+			Size = UDim2.fromOffset(200, 100),
+			BackgroundColor3 = Color3.fromRGB(30, 30, 30),
+			Parent = screenGui,
+			
+			["UICorner"] = { CornerRadius = UDim.new(0, 8) },
+			["UIStroke"] = { Color = Color3.fromRGB(50, 50, 50), Thickness = 1 },
+		})
+]]
+
+local Interface = {}
+
+-- Special UI components that can be created inline
+local SpecialProperties = {
+	["UICorner"] = true,
+	["UIStroke"] = true,
+	["UIPadding"] = true,
+	["UIListLayout"] = true,
+	["UIGridLayout"] = true,
+	["UITableLayout"] = true,
+	["UIPageLayout"] = true,
+	["UIFlexItem"] = true,
+	["UISizeConstraint"] = true,
+	["UITextSizeConstraint"] = true,
+	["UIAspectRatioConstraint"] = true,
+	["UIGradient"] = true,
+	["UIScale"] = true,
+}
+
+--[[
+	Create a new instance with properties
+	@param className The class name of the instance to create
+	@param properties Table of properties to apply (supports nested UI components)
+	@return The created instance
+]]
+function Interface.New(className: string, properties: { [string]: any }?): Instance
+	local instance = Instance.new(className)
+
+	if properties then
+		for key, value in pairs(properties) do
+			if SpecialProperties[key] then
+				-- Create UI component as child
+				local uiComponent = Instance.new(key)
+				if type(value) == "table" then
+					for prop, val in pairs(value) do
+						uiComponent[prop] = val
+					end
+				end
+				uiComponent.Parent = instance
+			else
+				instance[key] = value
+			end
+		end
+	end
+
+	return instance
 end
 
 --[[
-	Get icon data by name
-	@param iconName The name of the Lucide icon
-	@return IconData or nil if not found
+	Create a ScreenGui with common settings
+	@param name The name of the ScreenGui
+	@param parent Optional parent (defaults to CoreGui/PlayerGui)
+	@return The created ScreenGui
 ]]
-function Icons.GetIcon(iconName: string): IconData?
-	if not Success or not IconsModule then
-		return nil
+function Interface.CreateScreenGui(name: string, parent: Instance?): ScreenGui
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = name
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.ResetOnSpawn = false
+	screenGui.DisplayOrder = 999999
+
+	if parent then
+		screenGui.Parent = parent
+	else
+		-- Try gethui first, then CoreGui
+		local success, _ = pcall(function()
+			if gethui then
+				screenGui.Parent = gethui()
+			else
+				screenGui.Parent = wax.shared.CoreGui
+			end
+		end)
+
+		if not success then
+			pcall(function()
+				screenGui.Parent = wax.shared.Players.LocalPlayer:WaitForChild("PlayerGui")
+			end)
+		end
 	end
 
-	local success, icon = pcall(IconsModule.GetAsset, iconName)
-	if not success then
-		return nil
-	end
-
-	return icon
+	return screenGui
 end
 
 --[[
-	Apply icon to an ImageLabel
-	@param imageLabel The ImageLabel to apply the icon to
-	@param iconName The name of the Lucide icon
-	@return boolean indicating success
+	Create a TextLabel with sensible defaults
 ]]
-function Icons.ApplyIcon(imageLabel: ImageLabel, iconName: string): boolean
-	local icon = Icons.GetIcon(iconName)
-	if not icon then
-		return false
+function Interface.CreateTextLabel(properties: { [string]: any }): TextLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		TextColor3 = Color3.fromRGB(220, 220, 220),
+		TextSize = 14,
+		Font = Enum.Font.GothamMedium,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
 	end
 
-	imageLabel.Image = icon.Url
-	imageLabel.ImageRectOffset = icon.ImageRectOffset
-	imageLabel.ImageRectSize = icon.ImageRectSize
-	return true
+	return Interface.New("TextLabel", properties) :: TextLabel
 end
 
 --[[
-	Check if icons are available
-	@return boolean
+	Create a TextButton with sensible defaults
 ]]
-function Icons.IsAvailable(): boolean
-	return Success and IconsModule ~= nil
+function Interface.CreateTextButton(properties: { [string]: any }): TextButton
+	local defaults = {
+		BackgroundTransparency = 1,
+		TextColor3 = Color3.fromRGB(220, 220, 220),
+		TextSize = 14,
+		Font = Enum.Font.GothamMedium,
+		AutoButtonColor = false,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
+	end
+
+	return Interface.New("TextButton", properties) :: TextButton
 end
 
 --[[
-	Get list of all available icon names
-	@return Array of icon names or empty array if not loaded
+	Create an ImageLabel with sensible defaults
 ]]
-function Icons.GetAllIconNames(): { string }
-	if not Success or not IconsModule or not IconsModule.Icons then
-		return {}
+function Interface.CreateImageLabel(properties: { [string]: any }): ImageLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		ScaleType = Enum.ScaleType.Fit,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
 	end
-	return IconsModule.Icons
+
+	return Interface.New("ImageLabel", properties) :: ImageLabel
 end
 
-return Icons
+--[[
+	Create an ImageButton with sensible defaults
+]]
+function Interface.CreateImageButton(properties: { [string]: any }): ImageButton
+	local defaults = {
+		BackgroundTransparency = 1,
+		ScaleType = Enum.ScaleType.Fit,
+		AutoButtonColor = false,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
+	end
+
+	return Interface.New("ImageButton", properties) :: ImageButton
+end
+
+--[[
+	Create a ScrollingFrame with sensible defaults
+]]
+function Interface.CreateScrollingFrame(properties: { [string]: any }): ScrollingFrame
+	local defaults = {
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 4,
+		ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}
+
+	for key, value in pairs(defaults) do
+		if properties[key] == nil then
+			properties[key] = value
+		end
+	end
+
+	return Interface.New("ScrollingFrame", properties) :: ScrollingFrame
+end
+
+return Interface
+
+end)() end,
+    [8] = function()local wax,script,require=ImportGlobals(8)local ImportGlobals return (function(...)--[[
+	Resize Module - Template
+	Enables resize functionality on UI frames.
+	
+	Usage:
+		local Resize = require(path.to.Resize)
+		
+		Resize.new({
+			MainFrame = mainFrame,
+			MinimumSize = Vector2.new(300, 200),
+			MaximumSize = UDim2.fromOffset(800, 600),
+		})
+]]
+
+local Resize = {}
+Resize.__index = Resize
+
+local UserInputService = game:GetService("UserInputService")
+
+local HANDLE_SIZE = 6
+local CORNER_HANDLE_SIZE = 20
+
+export type ResizeOptions = {
+	MainFrame: Frame,
+	MinimumSize: Vector2? | UDim2?,
+	MaximumSize: UDim2?,
+	HandleSize: number?,
+	CornerHandleSize: number?,
+	Mirrored: boolean?,
+}
+
+export type ResizeObject = {
+	MainFrame: Frame,
+	ResizeHandle: TextButton,
+	Enabled: boolean,
+	SetEnabled: (self: ResizeObject, enabled: boolean) -> (),
+	Destroy: (self: ResizeObject) -> (),
+}
+
+--[[
+	Create a new resizable frame
+	@param options Configuration options
+	@return ResizeObject
+]]
+function Resize.new(options: ResizeOptions): ResizeObject
+	local MainFrame = options.MainFrame
+	local HandleSize = options.HandleSize or HANDLE_SIZE
+	local CornerHandleSize = options.CornerHandleSize or CORNER_HANDLE_SIZE
+	local Mirrored = options.Mirrored or false
+
+	local MinimumSize
+	if typeof(options.MinimumSize) == "Vector2" then
+		MinimumSize = UDim2.fromOffset(options.MinimumSize.X, options.MinimumSize.Y)
+	elseif typeof(options.MinimumSize) == "UDim2" then
+		MinimumSize = options.MinimumSize
+	else
+		MinimumSize = UDim2.fromOffset(200, 150)
+	end
+
+	local MaximumSize = options.MaximumSize or UDim2.fromOffset(9999, 9999)
+
+	local self = setmetatable({}, Resize)
+	self.MainFrame = MainFrame
+	self.Enabled = true
+
+	-- Bottom-right corner resize handle
+	local ResizeHandle = Instance.new("TextButton")
+	ResizeHandle.Text = ""
+	ResizeHandle.BackgroundTransparency = 1
+	ResizeHandle.Size = UDim2.fromOffset(CornerHandleSize, CornerHandleSize)
+	ResizeHandle.Position = UDim2.new(1, -CornerHandleSize, 1, -CornerHandleSize)
+	ResizeHandle.ZIndex = 100
+	ResizeHandle.Parent = MainFrame
+
+	self.ResizeHandle = ResizeHandle
+
+	local dragging = false
+	local dragStart = nil
+	local startSize = nil
+	local connections = {}
+
+	table.insert(connections, ResizeHandle.InputBegan:Connect(function(input)
+		if not self.Enabled then return end
+		
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startSize = MainFrame.Size
+
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end))
+
+	table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+		if not self.Enabled then return end
+		
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local delta = input.Position - dragStart
+			local newWidth = math.clamp(
+				startSize.X.Offset + (Mirrored and -delta.X or delta.X),
+				MinimumSize.X.Offset,
+				MaximumSize.X.Offset
+			)
+			local newHeight = math.clamp(
+				startSize.Y.Offset + (Mirrored and -delta.Y or delta.Y),
+				MinimumSize.Y.Offset,
+				MaximumSize.Y.Offset
+			)
+
+			MainFrame.Size = UDim2.fromOffset(newWidth, newHeight)
+		end
+	end))
+
+	function self:SetEnabled(enabled: boolean)
+		self.Enabled = enabled
+		ResizeHandle.Visible = enabled
+		if not enabled then
+			dragging = false
+		end
+	end
+
+	function self:Destroy()
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		connections = {}
+		ResizeHandle:Destroy()
+	end
+
+	return self
+end
+
+return Resize
 
 end)() end,
     [9] = function()local wax,script,require=ImportGlobals(9)local ImportGlobals return (function(...)--[[
@@ -1816,349 +2408,6 @@ function Sonner.clear()
 end
 
 return Sonner
-
-end)() end,
-    [8] = function()local wax,script,require=ImportGlobals(8)local ImportGlobals return (function(...)--[[
-	Resize Module - Template
-	Enables resize functionality on UI frames.
-	
-	Usage:
-		local Resize = require(path.to.Resize)
-		
-		Resize.new({
-			MainFrame = mainFrame,
-			MinimumSize = Vector2.new(300, 200),
-			MaximumSize = UDim2.fromOffset(800, 600),
-		})
-]]
-
-local Resize = {}
-Resize.__index = Resize
-
-local UserInputService = game:GetService("UserInputService")
-
-local HANDLE_SIZE = 6
-local CORNER_HANDLE_SIZE = 20
-
-export type ResizeOptions = {
-	MainFrame: Frame,
-	MinimumSize: Vector2? | UDim2?,
-	MaximumSize: UDim2?,
-	HandleSize: number?,
-	CornerHandleSize: number?,
-	Mirrored: boolean?,
-}
-
-export type ResizeObject = {
-	MainFrame: Frame,
-	ResizeHandle: TextButton,
-	Enabled: boolean,
-	SetEnabled: (self: ResizeObject, enabled: boolean) -> (),
-	Destroy: (self: ResizeObject) -> (),
-}
-
---[[
-	Create a new resizable frame
-	@param options Configuration options
-	@return ResizeObject
-]]
-function Resize.new(options: ResizeOptions): ResizeObject
-	local MainFrame = options.MainFrame
-	local HandleSize = options.HandleSize or HANDLE_SIZE
-	local CornerHandleSize = options.CornerHandleSize or CORNER_HANDLE_SIZE
-	local Mirrored = options.Mirrored or false
-
-	local MinimumSize
-	if typeof(options.MinimumSize) == "Vector2" then
-		MinimumSize = UDim2.fromOffset(options.MinimumSize.X, options.MinimumSize.Y)
-	elseif typeof(options.MinimumSize) == "UDim2" then
-		MinimumSize = options.MinimumSize
-	else
-		MinimumSize = UDim2.fromOffset(200, 150)
-	end
-
-	local MaximumSize = options.MaximumSize or UDim2.fromOffset(9999, 9999)
-
-	local self = setmetatable({}, Resize)
-	self.MainFrame = MainFrame
-	self.Enabled = true
-
-	-- Bottom-right corner resize handle
-	local ResizeHandle = Instance.new("TextButton")
-	ResizeHandle.Text = ""
-	ResizeHandle.BackgroundTransparency = 1
-	ResizeHandle.Size = UDim2.fromOffset(CornerHandleSize, CornerHandleSize)
-	ResizeHandle.Position = UDim2.new(1, -CornerHandleSize, 1, -CornerHandleSize)
-	ResizeHandle.ZIndex = 100
-	ResizeHandle.Parent = MainFrame
-
-	self.ResizeHandle = ResizeHandle
-
-	local dragging = false
-	local dragStart = nil
-	local startSize = nil
-	local connections = {}
-
-	table.insert(connections, ResizeHandle.InputBegan:Connect(function(input)
-		if not self.Enabled then return end
-		
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = true
-			dragStart = input.Position
-			startSize = MainFrame.Size
-
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
-			end)
-		end
-	end))
-
-	table.insert(connections, UserInputService.InputChanged:Connect(function(input)
-		if not self.Enabled then return end
-		
-		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-			local delta = input.Position - dragStart
-			local newWidth = math.clamp(
-				startSize.X.Offset + (Mirrored and -delta.X or delta.X),
-				MinimumSize.X.Offset,
-				MaximumSize.X.Offset
-			)
-			local newHeight = math.clamp(
-				startSize.Y.Offset + (Mirrored and -delta.Y or delta.Y),
-				MinimumSize.Y.Offset,
-				MaximumSize.Y.Offset
-			)
-
-			MainFrame.Size = UDim2.fromOffset(newWidth, newHeight)
-		end
-	end))
-
-	function self:SetEnabled(enabled: boolean)
-		self.Enabled = enabled
-		ResizeHandle.Visible = enabled
-		if not enabled then
-			dragging = false
-		end
-	end
-
-	function self:Destroy()
-		for _, connection in ipairs(connections) do
-			connection:Disconnect()
-		end
-		connections = {}
-		ResizeHandle:Destroy()
-	end
-
-	return self
-end
-
-return Resize
-
-end)() end,
-    [7] = function()local wax,script,require=ImportGlobals(7)local ImportGlobals return (function(...)--[[
-	Interface Module - Template
-	Utility for creating UI elements with properties applied automatically.
-	
-	Usage:
-		local Interface = require(path.to.Interface)
-		
-		local frame = Interface.New("Frame", {
-			Size = UDim2.fromOffset(200, 100),
-			BackgroundColor3 = Color3.fromRGB(30, 30, 30),
-			Parent = screenGui,
-			
-			["UICorner"] = { CornerRadius = UDim.new(0, 8) },
-			["UIStroke"] = { Color = Color3.fromRGB(50, 50, 50), Thickness = 1 },
-		})
-]]
-
-local Interface = {}
-
--- Special UI components that can be created inline
-local SpecialProperties = {
-	["UICorner"] = true,
-	["UIStroke"] = true,
-	["UIPadding"] = true,
-	["UIListLayout"] = true,
-	["UIGridLayout"] = true,
-	["UITableLayout"] = true,
-	["UIPageLayout"] = true,
-	["UIFlexItem"] = true,
-	["UISizeConstraint"] = true,
-	["UITextSizeConstraint"] = true,
-	["UIAspectRatioConstraint"] = true,
-	["UIGradient"] = true,
-	["UIScale"] = true,
-}
-
---[[
-	Create a new instance with properties
-	@param className The class name of the instance to create
-	@param properties Table of properties to apply (supports nested UI components)
-	@return The created instance
-]]
-function Interface.New(className: string, properties: { [string]: any }?): Instance
-	local instance = Instance.new(className)
-
-	if properties then
-		for key, value in pairs(properties) do
-			if SpecialProperties[key] then
-				-- Create UI component as child
-				local uiComponent = Instance.new(key)
-				if type(value) == "table" then
-					for prop, val in pairs(value) do
-						uiComponent[prop] = val
-					end
-				end
-				uiComponent.Parent = instance
-			else
-				instance[key] = value
-			end
-		end
-	end
-
-	return instance
-end
-
---[[
-	Create a ScreenGui with common settings
-	@param name The name of the ScreenGui
-	@param parent Optional parent (defaults to CoreGui/PlayerGui)
-	@return The created ScreenGui
-]]
-function Interface.CreateScreenGui(name: string, parent: Instance?): ScreenGui
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = name
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	screenGui.ResetOnSpawn = false
-	screenGui.DisplayOrder = 999999
-
-	if parent then
-		screenGui.Parent = parent
-	else
-		-- Try gethui first, then CoreGui
-		local success, _ = pcall(function()
-			if gethui then
-				screenGui.Parent = gethui()
-			else
-				screenGui.Parent = wax.shared.CoreGui
-			end
-		end)
-
-		if not success then
-			pcall(function()
-				screenGui.Parent = wax.shared.Players.LocalPlayer:WaitForChild("PlayerGui")
-			end)
-		end
-	end
-
-	return screenGui
-end
-
---[[
-	Create a TextLabel with sensible defaults
-]]
-function Interface.CreateTextLabel(properties: { [string]: any }): TextLabel
-	local defaults = {
-		BackgroundTransparency = 1,
-		TextColor3 = Color3.fromRGB(220, 220, 220),
-		TextSize = 14,
-		Font = Enum.Font.GothamMedium,
-		TextXAlignment = Enum.TextXAlignment.Left,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("TextLabel", properties) :: TextLabel
-end
-
---[[
-	Create a TextButton with sensible defaults
-]]
-function Interface.CreateTextButton(properties: { [string]: any }): TextButton
-	local defaults = {
-		BackgroundTransparency = 1,
-		TextColor3 = Color3.fromRGB(220, 220, 220),
-		TextSize = 14,
-		Font = Enum.Font.GothamMedium,
-		AutoButtonColor = false,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("TextButton", properties) :: TextButton
-end
-
---[[
-	Create an ImageLabel with sensible defaults
-]]
-function Interface.CreateImageLabel(properties: { [string]: any }): ImageLabel
-	local defaults = {
-		BackgroundTransparency = 1,
-		ScaleType = Enum.ScaleType.Fit,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("ImageLabel", properties) :: ImageLabel
-end
-
---[[
-	Create an ImageButton with sensible defaults
-]]
-function Interface.CreateImageButton(properties: { [string]: any }): ImageButton
-	local defaults = {
-		BackgroundTransparency = 1,
-		ScaleType = Enum.ScaleType.Fit,
-		AutoButtonColor = false,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("ImageButton", properties) :: ImageButton
-end
-
---[[
-	Create a ScrollingFrame with sensible defaults
-]]
-function Interface.CreateScrollingFrame(properties: { [string]: any }): ScrollingFrame
-	local defaults = {
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ScrollBarThickness = 4,
-		ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80),
-		CanvasSize = UDim2.new(0, 0, 0, 0),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	}
-
-	for key, value in pairs(defaults) do
-		if properties[key] == nil then
-			properties[key] = value
-		end
-	end
-
-	return Interface.New("ScrollingFrame", properties) :: ScrollingFrame
-end
-
-return Interface
 
 end)() end,
     [5] = function()local wax,script,require=ImportGlobals(5)local ImportGlobals return (function(...)--[[
@@ -2472,27 +2721,6 @@ local ObjectTree = {
                         },
                         {
                             {
-                                10,
-                                2,
-                                {
-                                    "Theme"
-                                }
-                            },
-                            {
-                                8,
-                                2,
-                                {
-                                    "Resize"
-                                }
-                            },
-                            {
-                                4,
-                                2,
-                                {
-                                    "Drag"
-                                }
-                            },
-                            {
                                 5,
                                 2,
                                 {
@@ -2500,10 +2728,10 @@ local ObjectTree = {
                                 }
                             },
                             {
-                                7,
+                                4,
                                 2,
                                 {
-                                    "Interface"
+                                    "Drag"
                                 }
                             },
                             {
@@ -2519,6 +2747,27 @@ local ObjectTree = {
                                 {
                                     "Icons"
                                 }
+                            },
+                            {
+                                7,
+                                2,
+                                {
+                                    "Interface"
+                                }
+                            },
+                            {
+                                8,
+                                2,
+                                {
+                                    "Resize"
+                                }
+                            },
+                            {
+                                10,
+                                2,
+                                {
+                                    "Theme"
+                                }
                             }
                         }
                     }
@@ -2530,14 +2779,14 @@ local ObjectTree = {
 
 -- Line offsets for debugging (only included when minifyTables is false)
 local LineOffsets = {
-    [6] = 1488,
-    [9] = 1593,
-    [2] = 67,
-    [10] = 8,
-    [8] = 1821,
-    [7] = 1960,
-    [5] = 2164,
-    [4] = 2346
+    [10] = 1783,
+    [2] = 113,
+    [7] = 1842,
+    [6] = 8,
+    [8] = 2046,
+    [9] = 2185,
+    [5] = 2413,
+    [4] = 2595
 }
 
 -- Misc AOT variable imports

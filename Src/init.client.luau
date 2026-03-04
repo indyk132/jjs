@@ -1264,11 +1264,224 @@ end)
 -- GUI CATEGORIES + JJS INTEGRATION
 -- ============================================================
 
+-- Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
 -- Callback forwarding table
 local GameCallbacks = {}
 
+-- ============================================================
+-- ORCA FEATURES — Character / Players / Misc
+-- ============================================================
+
+-- --- state ---
+local FlightEnabled = false
+local FlightSpeed = 60
+local WalkSpeedEnabled = false
+local WalkSpeedValue = 16
+local OriginalWalkSpeed = 16
+local JumpHeightEnabled = false
+local JumpHeightValue = 50
+local OriginalJumpPower = 50
+local NoclipEnabled = false
+local GodModeEnabled = false
+local FreecamEnabled = false
+local FreecamSpeed = 1
+local FreecamCFrame: CFrame? = nil
+local FreecamAngles = {x = 0, y = 0}
+local OriginalCameraSubject = nil
+local SpectateEnabled = false
+local SpectateTarget: string? = nil
+
+-- flight objects
+local FlightBodyVelocity: BodyVelocity? = nil
+local FlightBodyGyro: BodyGyro? = nil
+
+-- --- Character category ---
+local CharCat = Library:AddCategory("Character", "user")
+CharCat:AddToggle("Flight", false, function(v)
+	FlightEnabled = v
+	local char = LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if v and hrp then
+		if FlightBodyVelocity then FlightBodyVelocity:Destroy() end
+		if FlightBodyGyro then FlightBodyGyro:Destroy() end
+		FlightBodyVelocity = Instance.new("BodyVelocity")
+		FlightBodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+		FlightBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+		FlightBodyVelocity.Parent = hrp
+		FlightBodyGyro = Instance.new("BodyGyro")
+		FlightBodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+		FlightBodyGyro.P = 9000
+		FlightBodyGyro.Parent = hrp
+		if hum then hum.PlatformStand = true end
+	else
+		if FlightBodyVelocity then FlightBodyVelocity:Destroy(); FlightBodyVelocity = nil end
+		if FlightBodyGyro then FlightBodyGyro:Destroy(); FlightBodyGyro = nil end
+		if hum then hum.PlatformStand = false end
+	end
+	Library:Notify(`Flight: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Flight Speed", 60, 10, 200, function(v)
+	FlightSpeed = v
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Walk Speed", false, function(v)
+	WalkSpeedEnabled = v
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if v then
+			OriginalWalkSpeed = hum.WalkSpeed
+		else
+			hum.WalkSpeed = OriginalWalkSpeed
+		end
+	end
+	Library:Notify(`Walk Speed: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Speed Value", 16, 1, 500, function(v)
+	WalkSpeedValue = v
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Jump Height", false, function(v)
+	JumpHeightEnabled = v
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if v then
+			OriginalJumpPower = hum.JumpPower
+		else
+			hum.UseJumpPower = true
+			hum.JumpPower = OriginalJumpPower
+		end
+	end
+	Library:Notify(`Jump Height: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Height Value", 50, 1, 500, function(v)
+	JumpHeightValue = v
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Noclip", false, function(v)
+	NoclipEnabled = v
+	Library:Notify(`Noclip: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddToggle("God Mode", false, function(v)
+	GodModeEnabled = v
+	Library:Notify(`God Mode: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSeparator()
+CharCat:AddToggle("Freecam", false, function(v)
+	FreecamEnabled = v
+	local cam = Workspace.CurrentCamera
+	if v then
+		OriginalCameraSubject = cam.CameraSubject
+		FreecamCFrame = cam.CFrame
+		local rx, ry = cam.CFrame:ToEulerAnglesYXZ()
+		FreecamAngles = {x = rx, y = ry}
+		cam.CameraType = Enum.CameraType.Scriptable
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	else
+		cam.CameraType = Enum.CameraType.Custom
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		if OriginalCameraSubject then
+			cam.CameraSubject = OriginalCameraSubject
+		end
+		FreecamCFrame = nil
+	end
+	Library:Notify(`Freecam: {v and "ON" or "OFF"}`, v and "success" or "error")
+end)
+CharCat:AddSlider("Freecam Speed", 1, 1, 10, function(v)
+	FreecamSpeed = v
+end)
+
+-- --- Players category ---
+local PlayersCat = Library:AddCategory("Players", "users")
+local _playerNames: {string} = {}
+for _, p in Players:GetPlayers() do
+	if p ~= LocalPlayer then table.insert(_playerNames, p.Name) end
+end
+local TargetPlayerDropdown = PlayersCat:AddDropdown("Target Player", _playerNames, _playerNames[1] or "(none)", function(v)
+	SpectateTarget = v
+end)
+Players.PlayerAdded:Connect(function(p)
+	if p ~= LocalPlayer then
+		table.insert(_playerNames, p.Name)
+		if TargetPlayerDropdown.UpdateOptions then TargetPlayerDropdown:UpdateOptions(_playerNames) end
+	end
+end)
+Players.PlayerRemoving:Connect(function(p)
+	local idx = table.find(_playerNames, p.Name)
+	if idx then table.remove(_playerNames, idx) end
+	if TargetPlayerDropdown.UpdateOptions then TargetPlayerDropdown:UpdateOptions(_playerNames) end
+end)
+PlayersCat:AddButton("Teleport to Player", function()
+	if not SpectateTarget then Library:Notify("No player selected!", "error"); return end
+	local target = Players:FindFirstChild(SpectateTarget)
+	if not target or not target.Character then Library:Notify("Player not found!", "error"); return end
+	local hrp = target.Character:FindFirstChild("HumanoidRootPart")
+	local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if hrp and myHrp then
+		myHrp.CFrame = hrp.CFrame * CFrame.new(0, 0, 3)
+		Library:Notify(`Teleported to {SpectateTarget}!`, "success")
+	end
+end)
+PlayersCat:AddToggle("Spectate", false, function(v)
+	SpectateEnabled = v
+	if v and SpectateTarget then
+		local target = Players:FindFirstChild(SpectateTarget)
+		if target and target.Character then
+			Workspace.CurrentCamera.CameraSubject = target.Character:FindFirstChildOfClass("Humanoid") or target.Character
+			Library:Notify(`Spectating {SpectateTarget}`, "success")
+		end
+	else
+		local char = LocalPlayer.Character
+		if char then
+			Workspace.CurrentCamera.CameraSubject = char:FindFirstChildOfClass("Humanoid") or char
+		end
+		if v then Library:Notify("No player selected!", "error") end
+	end
+end)
+
+-- --- Misc category ---
+local Misc = Library:AddCategory("Misc", "wrench")
+Misc:AddButton("Rejoin", function()
+	TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId)
+	Library:Notify("Rejoining...", "warning")
+end)
+Misc:AddButton("Server Hop", function()
+	pcall(function()
+		local url = `https://games.roblox.com/v1/games/{game.GameId}/servers/Public?sortOrder=Asc&limit=100`
+		local data = HttpService:JSONDecode(game:HttpGet(url))
+		if data and data.data then
+			for _, s in data.data do
+				if s.id ~= game.JobId and s.playing < s.maxPlayers then
+					TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id)
+					Library:Notify("Server hopping...", "warning")
+					return
+				end
+			end
+		end
+		Library:Notify("No available servers!", "error")
+	end)
+end)
+Misc:AddButton("Copy Job ID", function()
+	if setclipboard then
+		setclipboard(game.JobId)
+		Library:Notify("Job ID copied!", "success")
+	else
+		Library:Notify("Clipboard not supported!", "error")
+	end
+end)
+
 -- BlackFlash category
-local Combat = Library:AddCategory("BlackFlash", "zap")
+local Combat = Library:AddCategory("Black Flash", "zap")
 Combat:AddToggle("Auto Black Flash", false, function(v)
 	if GameCallbacks.autoBlackFlash then GameCallbacks.autoBlackFlash(v) end
 end)
@@ -1284,29 +1497,6 @@ Combat:AddSlider("Cast Delay 1", 32, 10, 100, function(v)
 end)
 Combat:AddSlider("Cast Delay 2", 35, 10, 100, function(v)
 	if GameCallbacks.setDelay2 then GameCallbacks.setDelay2(v) end
-end)
-Combat:AddSeparator()
-Combat:AddToggle("Auto Parry", false, function(v)
-	if GameCallbacks.autoParry then GameCallbacks.autoParry(v) end
-end)
-Combat:AddSlider("Parry Timing (ms)", 50, 10, 200, function(v)
-	if GameCallbacks.setParryTiming then GameCallbacks.setParryTiming(v) end
-end)
-Combat:AddSeparator()
-Combat:AddToggle("Auto Dodge", false, function(v)
-	if GameCallbacks.autoDodge then GameCallbacks.autoDodge(v) end
-end)
-Combat:AddToggle("M1 Auto Combo", false, function(v)
-	if GameCallbacks.autoCombo then GameCallbacks.autoCombo(v) end
-end)
-
--- Misc category
-local Misc = Library:AddCategory("Misc", "wrench")
-Misc:AddButton("Rejoin", function()
-	if GameCallbacks.rejoin then GameCallbacks.rejoin() end
-end)
-Misc:AddButton("Copy Job ID", function()
-	if GameCallbacks.copyJobId then GameCallbacks.copyJobId() end
 end)
 
 -- ============================================================
@@ -1399,18 +1589,77 @@ pcall(function()
 	GameCallbacks.setDelay2 = function(v)
 		delay2 = v / 100
 	end
+end)
 
-	GameCallbacks.rejoin = function()
-		pcall(function()
-			TeleportService:Teleport(game.PlaceId, LocalPlayer)
-		end)
+-- ============================================================
+-- CHARACTER FEATURE LOOPS
+-- ============================================================
+
+RunService.Stepped:Connect(function()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+
+	-- Noclip
+	if NoclipEnabled then
+		for _, part in char:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+			end
+		end
 	end
 
-	GameCallbacks.copyJobId = function()
-		pcall(function()
-			setclipboard(game.JobId)
-			Library:Notify("Job ID copied!", "success")
-		end)
+	-- God Mode
+	if GodModeEnabled and hum then
+		hum.Health = hum.MaxHealth
+	end
+
+	-- Walk Speed
+	if WalkSpeedEnabled and hum then
+		hum.WalkSpeed = WalkSpeedValue
+	end
+
+	-- Jump Height
+	if JumpHeightEnabled and hum then
+		hum.UseJumpPower = true
+		hum.JumpPower = JumpHeightValue
+	end
+
+	-- Flight
+	if FlightEnabled and hrp and FlightBodyVelocity then
+		local cam = Workspace.CurrentCamera
+		local dir = Vector3.new(0, 0, 0)
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
+		if dir.Magnitude > 0 then dir = dir.Unit end
+		FlightBodyVelocity.Velocity = dir * FlightSpeed
+		if FlightBodyGyro then FlightBodyGyro.CFrame = cam.CFrame end
+	end
+end)
+
+-- Freecam loop
+RunService.RenderStepped:Connect(function(dt)
+	if FreecamEnabled and FreecamCFrame then
+		local cam = Workspace.CurrentCamera
+		local delta = UserInputService:GetMouseDelta()
+		FreecamAngles.y = FreecamAngles.y - delta.X * 0.003
+		FreecamAngles.x = math.clamp(FreecamAngles.x - delta.Y * 0.003, -math.pi/2 + 0.1, math.pi/2 - 0.1)
+		local rot = CFrame.fromEulerAnglesYXZ(FreecamAngles.x, FreecamAngles.y, 0)
+		local move = Vector3.new(0, 0, 0)
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then move = move + Vector3.new(0, -1, 0) end
+		local speed = FreecamSpeed * 60 * dt
+		FreecamCFrame = CFrame.new(FreecamCFrame.Position) * rot * CFrame.new(move * speed)
+		cam.CFrame = FreecamCFrame
 	end
 end)
 
