@@ -1595,71 +1595,115 @@ end)
 -- CHARACTER FEATURE LOOPS
 -- ============================================================
 
-RunService.Stepped:Connect(function()
-	local char = LocalPlayer.Character
-	if not char then return end
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	local hrp = char:FindFirstChild("HumanoidRootPart")
-
-	-- Noclip
-	if NoclipEnabled then
-		for _, part in char:GetDescendants() do
-			if part:IsA("BasePart") then
-				part.CanCollide = false
-			end
+-- Flight movement
+RunService.Heartbeat:Connect(function()
+	if FlightEnabled then
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and FlightBodyVelocity and FlightBodyGyro then
+			local cam = Workspace.CurrentCamera
+			local dir = Vector3.new(0, 0, 0)
+			if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
+			if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
+			FlightBodyVelocity.Velocity = if dir.Magnitude > 0 then dir.Unit * FlightSpeed else Vector3.zero
+			FlightBodyGyro.CFrame = cam.CFrame
 		end
-	end
-
-	-- God Mode
-	if GodModeEnabled and hum then
-		hum.Health = hum.MaxHealth
-	end
-
-	-- Walk Speed
-	if WalkSpeedEnabled and hum then
-		hum.WalkSpeed = WalkSpeedValue
-	end
-
-	-- Jump Height
-	if JumpHeightEnabled and hum then
-		hum.UseJumpPower = true
-		hum.JumpPower = JumpHeightValue
-	end
-
-	-- Flight
-	if FlightEnabled and hrp and FlightBodyVelocity then
-		local cam = Workspace.CurrentCamera
-		local dir = Vector3.new(0, 0, 0)
-		if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
-		if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
-		if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
-		if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
-		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
-		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
-		if dir.Magnitude > 0 then dir = dir.Unit end
-		FlightBodyVelocity.Velocity = dir * FlightSpeed
-		if FlightBodyGyro then FlightBodyGyro.CFrame = cam.CFrame end
 	end
 end)
 
--- Freecam loop
+-- Noclip
+RunService.Stepped:Connect(function()
+	if NoclipEnabled then
+		local char = LocalPlayer.Character
+		if char then
+			for _, part in char:GetDescendants() do
+				if part:IsA("BasePart") then part.CanCollide = false end
+			end
+		end
+	end
+end)
+
+-- WalkSpeed, JumpHeight, GodMode continuous
+RunService.Heartbeat:Connect(function()
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if WalkSpeedEnabled then hum.WalkSpeed = WalkSpeedValue end
+		if JumpHeightEnabled then hum.UseJumpPower = true; hum.JumpPower = JumpHeightValue end
+		if GodModeEnabled then hum.Health = hum.MaxHealth end
+	end
+end)
+
+-- Freecam mouse look
+local FREECAM_SENSITIVITY = 0.003
+UserInputService.InputChanged:Connect(function(input)
+	if FreecamEnabled and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = input.Delta
+		FreecamAngles.y = FreecamAngles.y - delta.X * FREECAM_SENSITIVITY
+		FreecamAngles.x = math.clamp(FreecamAngles.x - delta.Y * FREECAM_SENSITIVITY, -math.pi / 2 + 0.01, math.pi / 2 - 0.01)
+	end
+end)
+
+-- Freecam movement
 RunService.RenderStepped:Connect(function(dt)
 	if FreecamEnabled and FreecamCFrame then
 		local cam = Workspace.CurrentCamera
-		local delta = UserInputService:GetMouseDelta()
-		FreecamAngles.y = FreecamAngles.y - delta.X * 0.003
-		FreecamAngles.x = math.clamp(FreecamAngles.x - delta.Y * 0.003, -math.pi/2 + 0.1, math.pi/2 - 0.1)
-		local rot = CFrame.fromEulerAnglesYXZ(FreecamAngles.x, FreecamAngles.y, 0)
-		local move = Vector3.new(0, 0, 0)
-		if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
-		if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
-		if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
-		if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
-		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0, 1, 0) end
-		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then move = move + Vector3.new(0, -1, 0) end
+		cam.CameraType = Enum.CameraType.Scriptable
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 		local speed = FreecamSpeed * 60 * dt
-		FreecamCFrame = CFrame.new(FreecamCFrame.Position) * rot * CFrame.new(move * speed)
+		local rotation = CFrame.Angles(FreecamAngles.x, FreecamAngles.y, 0)
+		local moveDir = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + rotation.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - rotation.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - rotation.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + rotation.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+		local pos = FreecamCFrame.Position
+		if moveDir.Magnitude > 0 then
+			pos = pos + moveDir.Unit * speed
+		end
+		FreecamCFrame = CFrame.new(pos) * rotation
 		cam.CFrame = FreecamCFrame
+	end
+end)
+
+-- Spectate follow
+RunService.Heartbeat:Connect(function()
+	if SpectateEnabled and SpectateTarget then
+		local target = Players:FindFirstChild(SpectateTarget)
+		if target and target.Character then
+			local hum = target.Character:FindFirstChildOfClass("Humanoid")
+			if hum and Workspace.CurrentCamera.CameraSubject ~= hum then
+				Workspace.CurrentCamera.CameraSubject = hum
+			end
+		end
+	end
+end)
+
+-- Handle respawn
+LocalPlayer.CharacterAdded:Connect(function(char)
+	task.wait(0.3)
+	if FlightEnabled then
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hrp then
+			if FlightBodyVelocity then pcall(function() FlightBodyVelocity:Destroy() end) end
+			if FlightBodyGyro then pcall(function() FlightBodyGyro:Destroy() end) end
+			FlightBodyVelocity = Instance.new("BodyVelocity")
+			FlightBodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+			FlightBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+			FlightBodyVelocity.Parent = hrp
+			FlightBodyGyro = Instance.new("BodyGyro")
+			FlightBodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+			FlightBodyGyro.P = 9000
+			FlightBodyGyro.Parent = hrp
+			if hum then hum.PlatformStand = true end
+		end
 	end
 end)
 
