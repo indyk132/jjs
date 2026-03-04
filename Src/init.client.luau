@@ -127,10 +127,10 @@ Interface.New("TextLabel", {
 
 Interface.New("TextLabel", {
 	BackgroundTransparency = 1,
-	Size = UDim2.new(0, 60, 0, 18),
+	Size = UDim2.new(0, 160, 0, 18),
 	Position = UDim2.new(0, 72, 0.5, 0),
 	AnchorPoint = Vector2.new(0, 0.5),
-	Text = "JJS",
+	Text = "Jujutsu Shenanigans",
 	TextColor3 = Theme.TextMuted,
 	TextSize = 11,
 	Font = Enum.Font.GothamMedium,
